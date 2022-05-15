@@ -1,2 +1,3 @@
 
-This repo provides the code to set up the simulation for the paper titled Paul, S., Nath, S., Warren, K., (2022). Causal Network Influence with Latent Homophily and Measurement Error: An Application to Therapeutic Community 
+This repo provides the code to implement the methods and set up the simulation for the paper: 
+Paul, S., Nath, S., Warren, K., (2022). Causal Network Influence with Latent Homophily and Measurement Error: An Application to Therapeutic Community. Preprint at arXiv: 2203.14223

@@ -1,0 +1,358 @@
+---
+title: "Simulation"
+date: "05/15/2022"
+output: 
+  html_document:
+    highlight: haddock
+    theme: journal
+    number_sections: no
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    code_folding: hide
+---
+
+
+```{r, include=FALSE}
+
+#install the following packages
+library(MASS)
+library(foreach)
+library(doParallel)
+n.cores <- parallel::detectCores() - 1
+my.cluster <- parallel::makeCluster(
+  n.cores, 
+  type = "PSOCK"
+)
+doParallel::registerDoParallel(cl = my.cluster)
+library(ggplot2)
+
+
+# Ensure that pacman is installed for package management and loading.
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse) # for data reading wrangling and visualization
+# for enabling dataframe manipulation
+pacman::p_load(dplyr)
+# for modeling, transforming, and visualizing data
+pacman::p_load(tidyverse)
+# for simplifying the process of creating tidy dat
+pacman::p_load(tidyr)
+# for working with tabular data
+pacman::p_load(data.table)
+# for data visualization
+pacman::p_load(ggplot2)
+# provides support to ggplot2 for labeling graphs
+pacman::p_load(directlabels)
+# for streamlining the model training process 
+pacman::p_load(knitr)
+# for providing a prettier RMarkdown (1.0.1)
+pacman::p_load(kableExtra)
+# for forest-based statistical estimation and inference
+pacman::p_load(corrplot)
+
+library(dplyr)
+library(kableExtra)
+library(haven)
+library(foreach)
+library(readxl)
+library(car)
+library(lme4)
+library(plyr)
+library(readr)
+library(dplyr)
+library(caret)
+library(ggplot2)
+library(repr)
+library(data.table)
+library(reporttools)
+library(lmtest)
+# for enabling dataframe manipulation
+pacman::p_load(dplyr)
+# for modeling, transforming, and visualizing data
+pacman::p_load(tidyverse)
+# for simplifying the process of creating tidy dat
+pacman::p_load(tidyr)
+# for working with tabular data
+pacman::p_load(data.table)
+# for data visualization
+pacman::p_load(ggplot2)
+# provides support to ggplot2 for labeling graphs
+pacman::p_load(directlabels)
+# for streamlining the model training process 
+pacman::p_load(caret)
+# for fitting a generalized linear model 
+pacman::p_load(glmnet)
+# for enabling fast implementation of random forests 
+pacman::p_load(ranger)
+# for providing a general-purpose tool for dynamic report generation
+pacman::p_load(knitr)
+# for providing a prettier RMarkdown (1.0.1)
+pacman::p_load(kableExtra)
+# for forest-based statistical estimation and inference
+pacman::p_load(grf)
+
+
+
+
+#set the same directory for the functions_codes.R and simulation.Rmd
+source("functions_codes.R")
+
+
+
+
+```
+
+# Objective
+
+This file provides the code to set up the simulation for the paper titled Paul, S., Nath, S., Warren, K., (2022). Causal Network Influence with Latent Homophily and Measurement Error: An Application to Therapeutic Community, [Preprint at arXiv: 2203.14223](https://arxiv.org/pdf/2203.14223.pdf)
+
+
+
+The simulation code is divided into the following components
+
+# Experiment Set-up
+
+1. We generate the networks from a Stochastic Block Model (SBM) with increasing number of nodes $n=\{50,  75, 100, 125, 150, 200, 250, 300, 400, 500, 600\}$
+
+2. Set up the experiment for recovery of $\rho$, $\gamma$, $\sigma^2$, standard errors. 
+
+3. The number of communities are set at four and the dimension of the latent homophily is set at two.
+
+4. We set $\beta_{0}=[1,2],\rho_{0}=0.4,\sigma_{0}=0.8,\gamma_{0}=[0.2,-0.3]$. 
+
+5. Matrix of probabilities $P$ is generated as $P=UU^T$, where the matrix $U_{n \times 2}$ is generated such that it has only 4 unique rows. 
+
+   - The resulting block matrix of probabilities is
+
+\[
+\begin{pmatrix}
+  0.53 &  0.19 &  0.18 & 0.45\\
+ 0.19 &  0.37 &  0.14 &  0.35 \\
+ 0.18 &  0.14 & 0.08 & 0.20 \\
+0.45 & 0.35  & 0.20 & 0.50 \\
+\end{pmatrix}
+\]
+
+
+```{r,echo=TRUE,eval=FALSE}
+
+#simulation not run (as eval=FALSE)
+#if want to run the simulation, remove eval=FALSE above
+
+## varying the number of nodes
+nodes = c(50,75,100,125,150,200,250,300,400,500,600)
+
+## number of communities fixed at 4, number of dimensions of the latent homophily vectors is 2.
+comms = 4
+d =2
+beta0 =c(1,2)
+rho0 =0.4
+sigma0 =0.8
+scale=1
+
+gamma0 = c(0.2,-0.3)
+
+estbeta<-list()
+sebeta<-list()
+testbeta<-list()
+estsigma<-list()
+
+for (m in 1:length(nodes)){
+
+## generate community assignment matrix
+meanprop<-rmultinom(nodes[m],1,rep(1/comms,comms))
+
+U = matrix(c(0.7,0.1,0.2,0.5,0.2,0.6,0.2,0.5),4,2)
+Bmat = scale*U%*%t(U)
+
+Ubig = t(meanprop)%*%U
+
+Z= matrix(rnorm(2*nodes[m],0,0.5),nodes[m],2)
+Z[,1] = Z[,1]+ 2*Ubig[,1] + Ubig[,2] 
+Z[,2] = Z[,2] + 0.8*Ubig[,1]+ Ubig[,2] 
+
+
+
+### Probability matrix according to RDPG SBM 
+pmat<-t(meanprop)%*%Bmat%*%meanprop
+
+
+
+estbeta[[m]] = matrix(NA,9,200)
+sebeta[[m]] = matrix(NA,9,200)
+testbeta[[m]] = matrix(NA,9,200)
+estsigma[[m]] = matrix(NA,3,200)
+
+
+
+
+for( i in 1:200){
+  X= matrix(0,nodes[m],nodes[m])
+  for(k in 1:(nodes[m]-1))
+  {
+    for(j in (k+1):nodes[m])
+    {
+      X[k,j]<-rbinom(1,1,pmat[k,j])
+      X[j,k]<-X[k,j]
+    }
+  }
+  D = rowSums(X)
+  D[D<1]=1
+  L = X/D
+  invX = solve(diag(nodes[m]) - rho0*L)
+  
+  Y = mvrnorm(n=1,mu = c(invX%*%((Ubig%*%beta0) + (Z%*%gamma0))),Sigma = invX%*%invX*sigma0^2)
+
+  
+
+
+  estclassic = sarMLclassicZ(Y,L,X,Z)
+  estbeta[[m]][1,i] = estclassic$influence
+  estbeta[[m]][2,i] = estclassic$betacovariate[1]
+  estbeta[[m]][3,i] = estclassic$betacovariate[2]
+
+  sebeta[[m]][1,i] = estclassic$SEinfluence
+  sebeta[[m]][2,i] = estclassic$SEbetacovariate[1]
+  sebeta[[m]][3,i] = estclassic$SEbetacovariate[2]
+
+  testbeta[[m]][1,i] = ifelse(estclassic$pvaluerho<0.05,1,0)
+  testbeta[[m]][2,i] = ifelse(estclassic$pvaluecovariate[1]<0.05,1,0)
+  testbeta[[m]][3,i] = ifelse(estclassic$pvaluecovariate[2]<0.05,1,0)
+
+  estsigma[[m]][1,i] =  estclassic$sigmasqhat
+  
+  ests = sarMLZ(Y,L,X,Z,d=2)
+  estbeta[[m]][4,i] = ests$influence
+  estbeta[[m]][5,i] = ests$betacovariate[1]
+  estbeta[[m]][6,i] = ests$betacovariate[2]
+
+  sebeta[[m]][4,i] = ests$SEinfluence
+  sebeta[[m]][5,i] = ests$SEbetacovariate[1]
+  sebeta[[m]][6,i] = ests$SEbetacovariate[2]
+
+  testbeta[[m]][4,i] = ifelse(ests$pvaluerho<0.05,1,0)
+  testbeta[[m]][5,i] = ifelse(ests$pvaluecovariate[1]<0.05,1,0)
+  testbeta[[m]][6,i] = ifelse(ests$pvaluecovariate[2]<0.05,1,0)
+
+  estsigma[[m]][2,i] =  ests$sigmasqhat
+
+  estmod = sarMLZc(Y,L,X,Z,d=2,comms=4)
+  estbeta[[m]][7,i] = estmod$influence
+  estbeta[[m]][8,i] = estmod$betacovariate[1]
+  estbeta[[m]][9,i] = estmod$betacovariate[2]
+
+  sebeta[[m]][7,i] = estmod$SEinfluence
+  sebeta[[m]][8,i] = estmod$SEbetacovariate[1]
+  sebeta[[m]][9,i] = estmod$SEbetacovariate[2]
+
+  testbeta[[m]][7,i] = ifelse(estmod$pvaluerho<0.05,1,0)
+  testbeta[[m]][8,i] = ifelse(estmod$pvaluecovariate[1]<0.05,1,0)
+  testbeta[[m]][9,i] = ifelse(estmod$pvaluecovariate[2]<0.05,1,0)
+
+  estsigma[[m]][3,i] =  estmod$sigmasqhat
+  
+ 
+}
+}
+
+
+
+
+
+
+
+
+
+
+```
+
+
+# Compare the performance of estimators 
+
+In this section, we compare estimates of the network influence parameter $\rho$ from the naive
+model (model with no latent factors), the model with latent factors but no bias correction,
+and the model with latent factors and bias correction.
+
+
+```{r,echo=TRUE}
+load("simuldatamain1.RData")
+simuldatamain=simuldatamain1
+
+theta= c(0.4)
+nodes= simuldatamain$nodes
+estbeta= simuldatamain$estbeta
+sebeta=simuldatamain$sebeta
+
+
+biasg1 = matrix(unlist(lapply(estbeta,function(x){
+  return(c(mean(x[1,]-theta[1]),mean(x[4,]-theta[1]),mean(x[7,]-theta[1])))
+})),3,length(nodes))
+
+
+sdg1 = matrix(unlist(lapply(estbeta,function(x){
+  return(c(sd(x[1,]-theta[1]),sd(x[4,]-theta[1]),sd(x[7,]-theta[1])))
+})),3,length(nodes))
+
+
+d1=biasg1[1,]
+d2=rep("No Latent Factor",length(d1))
+
+e1=biasg1[2,]
+e2=rep("Unc. Latent Factor",length(d1))
+
+f1=biasg1[3,]
+f2=rep("Bias Corr. Latent Factor",length(d1))
+
+data1=data.frame(d1,d2)
+colnames(data1)=c("Bias","Model")
+
+data2=data.frame(e1,e2)
+colnames(data2)=c("Bias","Model")
+
+data3=data.frame(f1,f2)
+colnames(data3)=c("Bias","Model")
+
+
+data=rbind(data1,data2,data3)
+
+dd1=sdg1[1,]
+dd1=data.frame(dd1)
+colnames(dd1)=c("se")
+
+
+dd2=sdg1[2,]
+dd2=data.frame(dd2)
+colnames(dd2)=c("se")
+
+dd3=sdg1[3,]
+dd3=data.frame(dd3)
+colnames(dd3)=c("se")
+
+datadse=rbind(dd1,dd2,dd3)
+
+data=cbind(data,datadse)
+
+data$nodes=rep(nodes,3)
+
+datanew=data
+
+datanew$se=datanew$se/sqrt(200)
+
+data$se=data$se/sqrt(200)
+
+
+datanew %>%
+  ggplot( aes(x=nodes, y=Bias, group="", color=Model)) +
+  geom_errorbar( aes(x=nodes, ymin=Bias-1.96*se, ymax=Bias+1.96*se), width=30) +
+  geom_point(aes(shape=Model, color=Model), size=4) +
+  scale_shape_manual(values=c(15, 16, 17))+
+  scale_color_manual(values=c('green','red', 'blue'))+
+  theme_bw()+
+  theme(legend.position = "bottom",text = element_text(size = 15,face="bold")) +
+  ggtitle("")+xlab("Nodes")+guides(colour = guide_legend(nrow = 1))+geom_hline(yintercept=0, linetype="dashed", color = "black",, size=1.5)+
+  scale_x_continuous(breaks = round(seq(min(datanew$nodes), max(datanew$nodes), by = 50),1))
+
+
+```
+
+

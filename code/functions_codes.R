@@ -444,6 +444,76 @@ return(list(predRsq = predr2, pred=pred, testdata=datapt))
 
 
 
+############# Homophily and bias correction in the longitudinal case ###########
+
+
+
+
+### The function is for networked least squares regression of response Y on predictors Z with the equation Y = U beta + Z gamma + epsilon
+### U needs to be estimated from network adjacency matrix X. 
+### The longitudinal network influence should be included in Z as another covariate. The network influence parameter $rho$ is then 
+### the parameter estimate corresponding to the column in Z that corresponds to the network influence vector
+
+## Y is univariate response
+## X is binary adjacency matrix (undirected)
+## d is the number of dimensions - currently needs to be given but can also be  automatically estimated using "ase" package
+## Z is the set of predictors.
+## comms is an optional parameter for number of communities in the network SBM model. If not provided then it defaults to d.
+
+### Function fits a RDPG SBM model to network to extract latent variables and estimate covariance of the estimated latent variables. 
+## The network effect is estimated controlling for those latent variables
+
+
+lfreg<-function(Y,X,Z,d,comms){
+  nodes=length(Y)
+  d2 = dim(Z)[2]
+
+  ### Extraction of latent vectors from network adjacency matrix through SVD
+
+  spectra<-svd(X)
+  Uhat<-spectra$u[,1:d]%*%diag(sqrt(spectra$d[1:d]))
+  
+  ### Perform k means clustering on Uhat and estimate cluster centers and sizes
+  clus = kmeans(Uhat, centers=comms, nstart=5)
+  cents = clus$centers
+  pihat = clus$size/nodes 
+  
+
+  ### Compute the covariance matrix of the estimated Uhat
+
+  Delhat = Reduce("+",lapply(1:comms, function(m){
+    return(pihat[m]*cents[m,]%*%t(cents[m,]))
+  }))
+  
+  deltal = lapply(1:comms, function(l){
+    expectl =  lapply(1:comms,function(m){
+      expU = cents[m,]%*%t(cents[m,])
+      prodU = t(cents[l,])%*%cents[m,]
+      deltaq = c(prodU - prodU^2)*expU
+      return(pihat[m]*deltaq)
+    })
+    explhat = Reduce("+",expectl)
+    return(solve(Delhat)%*% explhat%*%solve(Delhat))
+  })
+  
+  deltahat = Reduce("+",lapply(1:comms, function(l){
+    return(deltal[[l]]*c(pihat[l]))
+  }))
+
+  ### Estimate the regression parameters
+
+  MY = t(cbind(Uhat,Z))%*%Y
+  MZW = t(cbind(Uhat,Z))%*%(cbind(Uhat,Z))
+  omega  = matrix(0,(d+d2),(d+d2))
+  omega[1:d,1:d] = deltahat
+  betac  = as.matrix(solve(MZW - omega))%*%MY
+  hatY = cbind(Uhat,Z)%*%betac
+  sigma = sqrt((sum((Y-hatY)^2) - t(betac[1:d])%*%deltahat%*%betac[1:d])/(nodes - (d+d2)))
+  sebetac = c(sigma)*sqrt(diag(solve(MZW - omega)))
+
+  ### Return bias corrected estimates of beta with standard error
+  return(list(betac=betac,sebetac=sebetac, sigma=sigma))
+}
 
 
 

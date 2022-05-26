@@ -1,6 +1,6 @@
 ---
 title: "Simulation"
-date: "05/15/2022"
+date: "05/26/2022"
 output: 
   html_document:
     highlight: haddock
@@ -275,6 +275,7 @@ and the model with latent factors and bias correction.
 
 
 ```{r,echo=TRUE}
+
 load("simuldatamain1.RData")
 simuldatamain=simuldatamain1
 
@@ -348,9 +349,277 @@ datanew %>%
   scale_shape_manual(values=c(15, 16, 17))+
   scale_color_manual(values=c('green','red', 'blue'))+
   theme_bw()+
-  theme(legend.position = "bottom",text = element_text(size = 15,face="bold")) +
+  theme(legend.position = "bottom",text = element_text(size = 13,face="bold")) +
   ggtitle("")+xlab("Nodes")+guides(colour = guide_legend(nrow = 1))+geom_hline(yintercept=0, linetype="dashed", color = "black",, size=1.5)+
   scale_x_continuous(breaks = round(seq(min(datanew$nodes), max(datanew$nodes), by = 50),1))
+
+
+```
+
+
+# Simulation for the least squares network regression case
+
+1. We perform a simulation study to check if the bias corrected estimator using the estimated covariance matrix from the spectral embedding of SBM performs better than the uncorrected estimator. 
+
+2. Since OLS is used to estimate the model, we simplify the simulation setup by generating $U$ and $Z$ correlated with each other and generating $Y$ as $Y=U\beta + Z\gamma + \epsilon$. We set the dimensions of $U_i$ and $Z_i$ as 3 and 2 respectively. 
+
+3. As before the network $A$ is generated from a SBM with $k=3$ communities with $U$ being the latent homophily variable (therefore $U$ has 3 unique rows). Our goal is to correctly identify the parameters $\gamma_1, \gamma_2$.
+
+
+```{r,echo=TRUE,eval=FALSE}
+
+#### Simulation for the least squares network regression case
+
+nodes = c(50,100,150,200,300,400,500,600,700,800)
+comms = 3
+d =3
+d2 =2 
+beta =c(1,2,0.5)
+theta = c(0.3,-0.4)
+
+
+
+estbeta<-list()
+serbeta<-list()
+
+for (m in 1:length(nodes)){
+meanprop<-rmultinom(nodes[m],1,rep(1/comms,comms))
+
+Bmat=matrix(c(0.7,0.2,0.3,0.2,0.8,0.25,0.3,0.25,0.75),3,3)
+spectra= eigen(Bmat)
+U= spectra$vectors[,1:d]%*%diag(sqrt(spectra$values[1:d]))
+
+
+Ubig = t(meanprop)%*%U
+
+Z= matrix(rnorm(2*nodes[m],0,0.5),nodes[m],2)
+Z[,1] = Z[,1]+ 2*Ubig[,1] + Ubig[,2] 
+Z[,2] = Z[,2] + Ubig[,1]+ Ubig[,3] 
+
+
+pmat<-t(meanprop)%*%Bmat%*%meanprop
+
+estbeta[[m]] = matrix(NA,6,200)
+sebeta[[m]] = matrix(NA,6,200)
+
+
+
+for ( i in 1:200){
+X= matrix(0,nodes[m],nodes[m])
+for(k in 1:(nodes[m]-1))
+  {
+    for(j in (k+1):nodes[m])
+    {
+      X[k,j]<-rbinom(1,1,pmat[k,j])
+      X[j,k]<-X[k,j]
+      }
+  }
+
+Y = c(Ubig%*%beta) + c(Z%*%theta) + rnorm(nodes[m],0,1)
+
+
+
+spectra<-eigen(X)
+Uhat<-spectra$vectors[,1:d]%*%diag(sqrt(spectra$values[1:d]))
+regdata = data.frame(Y=Y,Uhat=Uhat,Z=Z)
+# incorrect
+betanull = lm(Y~0+Z,data=regdata)
+
+# uncorrected
+betalm = lm(Y~0+.,data=regdata)
+
+# bias corrected
+betacor = lfreg(Y,X,Z,d=3,comms=3)
+
+estbeta[[m]][1:2,i] = betanull$coefficients[1:2]
+
+
+estbeta[[m]][3:4,i] = betalm$coefficients[4:5]
+
+
+estbeta[[m]][5:6,i] = betacor$betac[4:5]
+
+
+sebeta[[m]][1:2,i] = summary(betanull)$coefficients[1:2,2]
+
+sebeta[[m]][3:4,i] = summary(betalm)$coefficients[4:5,2]
+
+sebeta[[m]][5:6,i] = betacor$sebetac[4:5]
+
+
+
+}
+}
+
+
+
+
+
+
+
+
+```
+
+
+
+## Simulation Output 
+
+```{r,echo=TRUE}
+
+load("simuldata.RData")
+
+theta= c(0.3, -0.4)
+nodes= simuldata$nodes
+estbeta= simuldata$estbeta
+sebeta=simuldata$sebeta
+
+biasg1 = matrix(unlist(lapply(estbeta,function(x){
+  return(c(mean(x[1,]-theta[1]),mean(x[3,]-theta[1]),mean(x[5,]-theta[1])))
+})),3,length(nodes))
+
+biasg2 = matrix(unlist(lapply(estbeta,function(x){
+  return(c(mean(x[2,]-theta[2]),mean(x[4,]-theta[2]),mean(x[6,]-theta[2])))
+})),3,length(nodes))
+
+sdg1 = matrix(unlist(lapply(estbeta,function(x){
+  return(c(sd(x[1,]-theta[1]),sd(x[3,]-theta[1]),sd(x[5,]-theta[1])))
+})),3,length(nodes))
+
+sdg2 = matrix(unlist(lapply(estbeta,function(x){
+  return(c(sd(x[2,]-theta[2]),sd(x[4,]-theta[2]),sd(x[6,]-theta[2])))
+})),3,length(nodes))
+
+
+
+
+
+
+d1=biasg1[1,]
+d2=rep("No Latent Factor",length(d1))
+
+e1=biasg1[2,]
+e2=rep("Unc. Latent Factor",length(d1))
+
+f1=biasg1[3,]
+f2=rep("Bias Corr. Latent Factor",length(d1))
+
+data1=data.frame(d1,d2)
+colnames(data1)=c("Bias","Model")
+
+data2=data.frame(e1,e2)
+colnames(data2)=c("Bias","Model")
+
+data3=data.frame(f1,f2)
+colnames(data3)=c("Bias","Model")
+
+
+data=rbind(data1,data2,data3)
+
+dd1=sdg1[1,]
+dd1=data.frame(dd1)
+colnames(dd1)=c("se")
+
+
+dd2=sdg1[2,]
+dd2=data.frame(dd2)
+colnames(dd2)=c("se")
+
+dd3=sdg1[3,]
+dd3=data.frame(dd3)
+colnames(dd3)=c("se")
+
+datadse=rbind(dd1,dd2,dd3)
+
+data=cbind(data,datadse)
+
+data$nodes=rep(nodes,3)
+
+datanew=subset(data,data$nodes!=50)
+
+datanew$se=datanew$se/sqrt(200)
+
+data$se=data$se/sqrt(200)
+
+
+
+datanew %>%
+  ggplot( aes(x=nodes, y=Bias, group="", color=Model)) +
+  geom_errorbar( aes(x=nodes, ymin=Bias-1.96*se, ymax=Bias+1.96*se), width=30) +
+  geom_point(aes(shape=Model, color=Model), size=4) +
+  scale_shape_manual(values=c(15, 16, 17))+
+  scale_color_manual(values=c('green','red', 'blue'))+
+  theme_bw()+
+  theme(legend.position = "bottom",text = element_text(size = 13,face="bold")) +
+  ggtitle("")+xlab("Nodes")+ylim(-0.2,0.8)+guides(colour = guide_legend(nrow = 1))+
+  scale_x_continuous(breaks = round(seq(min(datanew$nodes), max(datanew$nodes), by = 50),1))
+
+
+
+
+d1=biasg2[1,]
+d2=rep("No Latent Factor",length(d1))
+
+e1=biasg2[2,]
+e2=rep("Unc. Latent Factor",length(d1))
+
+f1=biasg2[3,]
+f2=rep("Bias Corr. Latent Factor",length(d1))
+
+data1=data.frame(d1,d2)
+colnames(data1)=c("Bias","Model")
+
+data2=data.frame(e1,e2)
+colnames(data2)=c("Bias","Model")
+
+data3=data.frame(f1,f2)
+colnames(data3)=c("Bias","Model")
+
+
+data=rbind(data1,data2,data3)
+
+dd1=sdg2[1,]
+dd1=data.frame(dd1)
+colnames(dd1)=c("se")
+
+
+dd2=sdg2[2,]
+dd2=data.frame(dd2)
+colnames(dd2)=c("se")
+
+dd3=sdg2[3,]
+dd3=data.frame(dd3)
+colnames(dd3)=c("se")
+
+datadse=rbind(dd1,dd2,dd3)
+
+data=cbind(data,datadse)
+
+data$nodes=rep(nodes,3)
+
+datanew=subset(data,data$nodes!=50)
+
+datanew$se=datanew$se/sqrt(200)
+
+data$se=data$se/sqrt(200)
+
+
+
+datanew %>%
+  ggplot( aes(x=nodes, y=Bias, group="", color=Model)) +
+  geom_errorbar( aes(x=nodes, ymin=Bias-1.96*se, ymax=Bias+1.96*se), width=25) +
+  geom_point(aes(shape=Model, color=Model), size=4) +
+  scale_shape_manual(values=c(15, 16, 17))+
+  scale_color_manual(values=c('green','red', 'blue'))+
+  theme_bw()+
+  theme(legend.position = "bottom",text = element_text(size = 13,face="bold")) +
+  ggtitle("")+xlab("Nodes")+guides(colour = guide_legend(nrow = 1))+
+  scale_x_continuous(breaks = round(seq(min(datanew$nodes), max(datanew$nodes), by = 50),1))+
+  ylim(-.35,0.15)
+
+
+
+
+
 
 
 ```

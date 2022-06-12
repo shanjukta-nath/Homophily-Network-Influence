@@ -357,7 +357,7 @@ datanew %>%
 ```
 
 
-# Simulation for the least squares network regression case
+# Simulation for the least squares networked regression 
 
 1. We perform a simulation study to check if the bias corrected estimator using the estimated covariance matrix from the spectral embedding of SBM performs better than the uncorrected estimator. 
 
@@ -596,7 +596,7 @@ data=cbind(data,datadse)
 
 data$nodes=rep(nodes,3)
 
-datanew=subset(data,data$nodes!=50)
+datanew=data
 
 datanew$se=datanew$se/sqrt(200)
 
@@ -623,5 +623,194 @@ datanew %>%
 
 
 ```
+
+
+
+# Simulation for longitudinal network influence 
+
+1. The data generating model is  $Y_{t+1} = \alpha Y_t + \rho L Y_t + U \beta + \epsilon_{t+1}$, where $\epsilon_{t}\sim N(0,1)$
+
+2. We use two time periods. For the frist period $Y_t = U \beta + \epsilon_t$. Then $Y_{t+1}$ is generated as above.
+
+3. The primary parameter of interest is the influence parameter rho.
+
+```{r,echo=TRUE,eval=FALSE}
+
+nodes = c(50,100,150,200,250,300,350,400,450,500,600,700,800)
+comms = 4
+d =2
+d2 =2
+beta =c(1,2)
+rho=0.3
+
+estbeta<-list()
+sebeta<-list()
+
+for (m in 1:length(nodes)){
+  meanprop<-rmultinom(nodes[m],1,rep(1/comms,comms))
+  
+  U = matrix(c(0.7,0.1,0.2,0.5,0.2,0.6,0.2,0.5),4,2)
+  #spectra= eigen(Bmat)
+  #U= spectra$vectors[,1:d]%*%diag(sqrt(spectra$values[1:d]))
+  Bmat = U%*%t(U)
+  
+  Ubig = t(meanprop)%*%U
+  
+  
+  pmat<-t(meanprop)%*%Bmat%*%meanprop
+  
+  estbeta[[m]] = matrix(NA,3,200)
+  sebeta[[m]] = matrix(NA,3,200)
+  
+  
+  
+  for ( i in 1:200){
+    X= matrix(0,nodes[m],nodes[m])
+    for(k in 1:(nodes[m]-1))
+    {
+      for(j in (k+1):nodes[m])
+      {
+        X[k,j]<-rbinom(1,1,pmat[k,j])
+        X[j,k]<-X[k,j]
+      }
+    }
+    
+    D = rowSums(X)
+    D[D<1]=1
+    L = X/D
+
+    ## running it for 2 time periods
+
+    Yt =  Ubig%*%beta + rnorm(nodes[m],0,1)
+    Yt1 =  Ubig%*%beta + rho*L%*%Yt+ 0.6*Yt + rnorm(nodes[m],0,1)
+    
+    ## Z contains two columns, the first one is the network influence
+    Z=cbind(L%*%Yt,Yt)
+    
+    spectra<-eigen(X)
+    Uhat<-spectra$vectors[,1:d]%*%diag(sqrt(spectra$values[1:d]))
+    regdata = data.frame(Y=Yt1,Uhat=Uhat,Z=Z)
+    
+    # no latent factor
+    betanull = lm(Y~0+Z,data=regdata)
+    estbeta[[m]][1,i] = betanull$coefficients[1]
+    
+    # latent factor but uncorrected
+    betalm = lm(Y~0+.,data=regdata)
+    estbeta[[m]][2,i] = betalm$coefficients[d+1]
+    
+    # bias corrected latent factor
+    betacor = lfreg(Yt1,X,Z,d=2,comms=4)
+    estbeta[[m]][3,i] = betacor$betac[d+1]
+    
+    
+    
+    
+    sebeta[[m]][1,i] = summary(betanull)$coefficients[1,2]
+    
+    sebeta[[m]][2,i] = summary(betalm)$coefficients[d+1,2]
+    
+    sebeta[[m]][3,i] = betacor$sebetac[d+1]
+    
+    
+    
+  }
+}
+
+
+
+
+
+```
+
+## Simulation Output 
+
+```{r,echo=TRUE}
+
+load("simuldatalong.RData")
+
+#nodes= simuldata$nodes
+#estbeta= simuldata$estbeta
+#sebeta=simuldata$sebeta
+theta=0.3
+
+biasg1 = matrix(unlist(lapply(estbeta,function(x){
+  return(c(mean(x[1,]-theta[1]),mean(x[2,]-theta[1]),mean(x[3,]-theta[1])))
+})),3,length(nodes))
+
+
+
+sdg1 = matrix(unlist(lapply(estbeta,function(x){
+  return(c(sd(x[1,]-theta[1]),sd(x[2,]-theta[1]),sd(x[3,]-theta[1])))
+})),3,length(nodes))
+
+
+
+d1=biasg1[1,]
+d2=rep("No Latent Factor",length(d1))
+
+e1=biasg1[2,]
+e2=rep("Unc. Latent Factor",length(d1))
+
+f1=biasg1[3,]
+f2=rep("Bias Corr. Latent Factor",length(d1))
+
+data1=data.frame(d1,d2)
+colnames(data1)=c("Bias","Model")
+
+data2=data.frame(e1,e2)
+colnames(data2)=c("Bias","Model")
+
+data3=data.frame(f1,f2)
+colnames(data3)=c("Bias","Model")
+
+
+data=rbind(data1,data2,data3)
+
+dd1=sdg1[1,]
+dd1=data.frame(dd1)
+colnames(dd1)=c("se")
+
+
+dd2=sdg1[2,]
+dd2=data.frame(dd2)
+colnames(dd2)=c("se")
+
+dd3=sdg1[3,]
+dd3=data.frame(dd3)
+colnames(dd3)=c("se")
+
+datadse=rbind(dd1,dd2,dd3)
+
+data=cbind(data,datadse)
+
+data$nodes=rep(nodes,3)
+
+datanew=data
+
+datanew$se=datanew$se/sqrt(200)
+
+data$se=data$se/sqrt(200)
+
+
+
+datanew %>%
+  ggplot( aes(x=nodes, y=Bias, group="", color=Model)) +
+  geom_errorbar( aes(x=nodes, ymin=Bias-1.96*se, ymax=Bias+1.96*se), width=30) +
+  geom_point(aes(shape=Model, color=Model), size=4) +
+  scale_shape_manual(values=c(15, 16, 17))+
+  scale_color_manual(values=c('green','red', 'blue'))+
+  theme_bw()+
+  theme(legend.position = "bottom",text = element_text(size = 13,face="bold")) +
+  ggtitle("")+xlab("Nodes")+ylab("Bias")+guides(colour = guide_legend(nrow = 1))+
+  scale_x_continuous(breaks = round(seq(min(datanew$nodes), max(datanew$nodes), by = 50),1))
+
+
+
+
+
+
+```
+
 
 
